@@ -1,0 +1,10 @@
+{
+  "name": "cleantalk/cleantalk-http-lib",
+  "description": "CleanTalk HTTP Requests library",
+  "authors": [
+    {
+      "name": "CleanTalk Team",
+      "email": "support@cleantalk.org"
+    }
+  ]
+}
