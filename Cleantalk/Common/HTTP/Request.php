@@ -1,37 +1,34 @@
 <?php
 
-
 namespace Cleantalk\Common\HTTP;
-
 
 /**
  * Class Request
  *
  * @version       1.0.0
- * @package       CleantalkSP\Common\Helpers
+ * @package       Cleantalk\Common\Helpers
  * @author        Cleantalk team (welcome@cleantalk.org)
  * @copyright (C) CleanTalk team (http://cleantalk.org)
  * @license       GNU/GPL: http://www.gnu.org/copyleft/gpl.html
  * @see           https://github.com/CleanTalk/security-malware-firewall
  */
-
 class Request
 {
-     /**
+    /**
      * Default user agent for HTTP requests
      */
     const AGENT = 'Cleantalk-Helper/1.0.0';
-    
+
     /**
      * @var string|string[] Single URL string or array of URLs for multi request
      */
     protected $url;
-    
+
     /**
      * @var array POST|GET indexed array with data to send
      */
     protected $data = [];
-    
+
     /**
      * @var string|string[] Array with presets
      *                          Example: array('get_code', 'async')
@@ -48,7 +45,7 @@ class Request
      *      retry_with_socket     - make another request with socket if cURL failed to retrieve data
      */
     protected $presets = [];
-    
+
     /**
      * @var array Optional options for CURL connection
      *              Example: array(
@@ -59,18 +56,18 @@ class Request
      *            )
      */
     protected $options = [];
-    
+
     /**
-     * @var callable Callback function to process after the request is performed without error to process received data
+     * @var array [callable] Callback function to process after the request is performed without error to process received data
      *               If passed will be fired for both single and multi requests
      */
     protected $callbacks = [];
-    
+
     /**
-     * @var Response|Response[]
+     * @var Response|array<Response>
      */
     public $response;
-    
+
     /**
      * @param mixed $url
      *
@@ -79,10 +76,10 @@ class Request
     public function setUrl($url)
     {
         $this->url = $url;
-        
+
         return $this;
     }
-    
+
     /**
      * @param mixed $data
      *
@@ -91,13 +88,13 @@ class Request
     public function setData($data)
     {
         // If $data scalar converting it to array
-        $this->data = ! empty($data) && is_scalar($data)
-            ? $data = array($data => 1)
+        $this->data = ! empty($data) && ! self::isJson($data) && is_scalar($data)
+            ? array((string)$data => 1)
             : $data;
-        
+
         return $this;
     }
-    
+
     /**
      * Set one or more presets which change the way of the processing Request::request
      *
@@ -123,10 +120,10 @@ class Request
         $this->presets = ! is_array($presets)
             ? explode(' ', $presets)
             : $presets;
-        
+
         return $this;
     }
-    
+
     /**
      * @param mixed $options
      *
@@ -135,36 +132,37 @@ class Request
     public function setOptions($options)
     {
         $this->options = $options;
-        
+
         return $this;
     }
-    
+
     /**
      * Set callback and additional arguments which will be passed to callback function
      *
      * @param callable $callback
-     * @param array    $arguments
-     * @param int      $priority
-     * @param bool     $pass_response
+     * @param array $arguments
+     * @param int $priority
+     * @param bool $pass_response
      *
      * @return Request
+     * @psalm-suppress UnusedVariable
      */
     public function addCallback($callback, $arguments = array(), $priority = null, $pass_response = false)
     {
         $priority = $priority ?: 100;
-        if( isset( $this->callbacks[ $priority ] ) ){
+        if ( isset($this->callbacks[$priority]) ) {
             return $this->addCallback($callback, $arguments, ++$priority);
         }
-    
-        $this->callbacks[ $priority ] = [
+
+        $this->callbacks[$priority] = [
             'function'      => $callback,
             'arguments'     => $arguments,
             'pass_response' => $pass_response,
         ];
-        
+
         return $this;
     }
-    
+
     /**
      * Function sends raw http request
      *
@@ -173,34 +171,38 @@ class Request
     public function request()
     {
         // Return the error if cURL is not installed
-        if( ! function_exists('curl_init') ){
+        if ( ! function_exists('curl_init') ) {
             return array('error' => 'CURL_NOT_INSTALLED');
         }
-        
-        if( empty( $this->url ) ) {
-            return array( 'error' => 'URL_IS_NOT_SET' );
+
+        if ( empty($this->url) ) {
+            return array('error' => 'URL_IS_NOT_SET');
         }
-        
+
         $this->convertOptionsTocURLFormat();
         $this->appendOptionsObligatory();
         $this->processPresets();
-        
+
         // Call cURL multi request if many URLs passed
         $this->response = is_array($this->url)
             ? $this->requestMulti()
             : $this->requestSingle();
-        
+
         // Process the error. Unavailable for multiple URLs.
-        if( ! is_array($this->url) && $this->response->getError() && in_array('retry_with_socket', $this->presets, true) ){
+        if (
+            ! is_array($this->url) &&
+            $this->response->getError() &&
+            in_array('retry_with_socket', $this->presets, true)
+        ) {
             $this->response = $this->requestWithSocket();
-            if( $this->response->getError() ){
+            if ( $this->response->getError() ) {
                 return $this->response->getError();
             }
         }
-        
+
         return $this->runCallbacks();
     }
-    
+
     /**
      * @return Response
      */
@@ -208,71 +210,71 @@ class Request
     {
         // Make a request
         $ch = curl_init();
-        
+
         curl_setopt_array($ch, $this->options);
-        
+
         $request_result = curl_exec($ch);    // Gather request result
         $curl_info      = curl_getinfo($ch); // Gather HTTP response information
-        if( $request_result === false ){
+        if ( $request_result === false ) {
             $request_result = array('error' => curl_error($ch));
         }
-        
+
         curl_close($ch);
-        
+
+
         return new Response($request_result, $curl_info);
     }
-    
-    
+
+
     /**
      * Do multi curl requests without processing it.
      *
-     * @return Response[]
+     * @return array<Response>
      */
     protected function requestMulti()
     {
-        $urls_count = count($this->url);
-        $curl_arr   = array();
-        $mh         = curl_multi_init();
-        
-        for($i = 0; $i < $urls_count; $i++){
-            
+        $urls_count     = count($this->url);
+        $curl_arr       = array();
+        $mh             = curl_multi_init();
+        $this->response = [];
+
+        for ( $i = 0; $i < $urls_count; $i++ ) {
             $this->options[CURLOPT_URL] = $this->url[$i];
-            $curl_arr[$i] = curl_init($this->url[$i]);
-            
+            $curl_arr[$i]               = curl_init($this->url[$i]);
+
             curl_setopt_array($curl_arr[$i], $this->options);
             curl_multi_add_handle($mh, $curl_arr[$i]);
         }
-        
+
         do {
-            curl_multi_exec($mh,$running);
+            curl_multi_exec($mh, $running);
             usleep(1000);
-        } while($running > 0);
-        
-        for($i = 0, $results = array(); $i < $urls_count; $i++){
-            
+        } while ( $running > 0 );
+
+        for ( $i = 0; $i < $urls_count; $i++ ) {
             $curl_info     = curl_getinfo($curl_arr[$i]); // Gather HTTP response information
-            $received_data = curl_multi_getcontent($curl_arr[ $i ]);
-            if( $received_data === false ){
-                $received_data = array('error' => curl_error($curl_arr[ $i ]));
+            $received_data = curl_multi_getcontent($curl_arr[$i]);
+            if ( $received_data === '' ) {
+                $received_data = array('error' => curl_error($curl_arr[$i]));
             }
-            
-            $this->response[ $this->url[ $i ] ] = new Response($received_data, $curl_info);
+
+            $this->response[$this->url[$i]] = new Response($received_data, $curl_info);
         }
-        
+
         return $this->response;
     }
-    
+
     /**
      * Make a request with socket, exactly with file_get_contents()
      *
-     * @return false|string|string[]
+     * @return Response
      */
     private function requestWithSocket()
     {
-        if( ! ini_get('allow_url_fopen') ){
-            return ['error' => 'ALLOW_URL_FOPEN_IS_DISABLED'];
+        if ( ! ini_get('allow_url_fopen') ) {
+            return new Response(['error' => 'ALLOW_URL_FOPEN_IS_DISABLED'], []);
         }
-        
+
         $context = stream_context_create(
             [
                 'http' => [
@@ -282,44 +284,40 @@ class Request
                 ],
             ]
         );
-        
-        $response_content =  @file_get_contents($this->url, 0, $context)
+
+        $response_content = @file_get_contents($this->url, false, $context)
             ?: ['error' => 'FAILED_TO_USE_FILE_GET_CONTENTS'];
-        
+
         return new Response($response_content, []);
     }
-    
+
     // Process with callback if passed. Save the processed result.
     protected function runCallbacks()
     {
         $return_value = [];
-        
+
         // Cast to array to precess result from $this->requestSingle as $this->requestMulti results
         $responses = is_object($this->response)
             ? [$this->response]
             : $this->response;
-        
+
         // Sort callback to keep the priority order
         ksort($this->callbacks);
-        
-        foreach( $responses as $url => &$response ){
-            
+
+        foreach ( $responses as $url => &$response ) {
             // Skip the processing if the error occurred in this specific result
-            if( $response->getError() ){
+            if ( $response->getError() ) {
                 $return_value[] = $response->getError();
                 continue;
             }
-            
+
             // Get content to process
             $content = $response->getContentProcessed();
-            
+
             // Perform all provided callback functions to each request result
-            if( ! empty($this->callbacks)){
-                
-                foreach( $this->callbacks as $callback ){
-                    
-                    if( is_callable($callback['function']) ){
-                        
+            if ( ! empty($this->callbacks) ) {
+                foreach ( $this->callbacks as $callback ) {
+                    if ( is_callable($callback['function']) ) {
                         // Run callback
                         $content = call_user_func_array(
                             $callback['function'],
@@ -331,25 +329,25 @@ class Request
                                 $callback['arguments']
                             )
                         );
-                        
+
                         // Foolproof
-                        if( ! $content instanceof Response ){
+                        if ( ! $content instanceof Response ) {
                             $response->setProcessed($content);
                         }
                     }
                 }
             }
-            
-            $return_value[ $url ] = $content instanceof Response ? $content->getContentProcessed() : $content;
+
+            $return_value[$url] = $content instanceof Response ? $content->getContentProcessed() : $content;
         }
         unset($response);
-        
+
         // Return a single content if it was a single request
-        return is_array( $this->response ) && count( $this->response ) > 1
+        return is_array($this->response) && count($this->response) > 1
             ? $return_value
             : reset($return_value);
     }
-    
+
     /**
      * Convert given options from simple naming like 'timeout' or 'ssl'
      *  to sophisticated and standardized cURL defined constants
@@ -359,41 +357,45 @@ class Request
     private function convertOptionsTocURLFormat()
     {
         $temp_options = [];
-        foreach( $this->options as $option_name => &$option_value ){
-            switch($option_name){
-                
+        foreach ( $this->options as $option_name => &$option_value ) {
+            switch ( $option_name ) {
                 case 'timeout':
                     $temp_options[CURLOPT_TIMEOUT] = $option_value; // String
+                    unset($this->options[$option_name]);
                     break;
                 case 'sslverify':
-                    if( $option_value ){
+                    if ( $option_value ) {
                         $temp_options[CURLOPT_SSL_VERIFYPEER] = (bool)$option_value;      // Boolean
                         $temp_options[CURLOPT_SSL_VERIFYHOST] = (int)(bool)$option_value; // Int 0|1
+                        unset($this->options[$option_name]);
                     }
                     break;
                 case 'sslcertificates':
                     $temp_options[CURLOPT_CAINFO] = $option_name; // String
+                    unset($this->options[$option_name]);
                     break;
                 case 'headers':
                     $temp_options[CURLOPT_HTTPHEADER] = $option_name; // String[]
+                    unset($this->options[$option_name]);
                     break;
                 case 'user-agent':
                     $temp_options[CURLOPT_USERAGENT] = $option_name; // String
+                    unset($this->options[$option_name]);
                     break;
-                
+
                 // Unset unsupported string names in options
                 default:
-                    if( ! is_int($option_name) ){
-                        unset( $this->options[ $option_name ]);
+                    if ( ! is_int($option_name) ) {
+                        unset($this->options[$option_name]);
                     }
                     break;
             }
         }
         unset($option_value);
-        
+
         $this->options = array_replace($this->options, $temp_options);
     }
-    
+
     /**
      * Set default options to make a request
      */
@@ -414,7 +416,8 @@ class Request
                 CURLOPT_SSL_VERIFYPEER => false,
                 CURLOPT_SSL_VERIFYHOST => 0,
                 CURLOPT_HTTPHEADER     => array(
-                    'Expect:', // Fix for large data and old servers http://php.net/manual/ru/function.curl-setopt.php#82418
+                    'Expect:',
+                    // Fix for large data and old servers http://php.net/manual/ru/function.curl-setopt.php#82418
                     'Expires: ' . date(DATE_RFC822, mktime(0, 0, 0, 1, 1, 1971)),
                     'Cache-Control: no-store, no-cache, must-revalidate',
                     'Cache-Control: post-check=0, pre-check=0',
@@ -426,28 +429,26 @@ class Request
             $this->options
         );
     }
-    
+
     /**
      * Append options considering passed presets
      */
     protected function processPresets()
     {
-        foreach( $this->presets as $preset ){
-            
-            switch( $preset ){
-                
+        foreach ( $this->presets as $preset ) {
+            switch ( $preset ) {
                 // Do not follow redirects
                 case 'dont_follow_redirects':
                     $this->options[CURLOPT_FOLLOWLOCATION] = false;
                     $this->options[CURLOPT_MAXREDIRS]      = 0;
                     break;
-                
+
                 // Get headers only
                 case 'get_code':
                     $this->options[CURLOPT_HEADER] = true;
                     $this->options[CURLOPT_NOBODY] = true;
                     $this->addCallback(
-                        static function (Response $response, $url){
+                        static function (Response $response, $_url) {
                             return $response->getResponseCode();
                         },
                         array(),
@@ -455,80 +456,101 @@ class Request
                         true
                     );
                     break;
-                    
+
                 // Get headers only
                 case 'split_to_array':
                     $this->addCallback(
-                        static function ($response_content, $url){
+                        static function ($response_content, $_url) {
                             return explode(PHP_EOL, $response_content);
                         },
                         array(),
                         50
                     );
                     break;
-                
+
                 // Make a request, don't wait for an answer
                 case 'async':
                     $this->options[CURLOPT_CONNECTTIMEOUT] = 3;
                     $this->options[CURLOPT_TIMEOUT]        = 3;
                     break;
-                
+
                 case 'get':
                     $this->options[CURLOPT_CUSTOMREQUEST] = 'GET';
                     $this->options[CURLOPT_POST]          = false;
                     $this->options[CURLOPT_POSTFIELDS]    = null;
                     // Append parameter in a different way for single and multiple requests
-                    if( is_array($this->url) ){
-                        $this->url = array_map(function ($elem){ return self::appendParametersToURL($elem, $this->data); }, $this->url);
-                    }else{
-                        $this->options[CURLOPT_URL] = self::appendParametersToURL($this->options[CURLOPT_URL], $this->data);
+                    if ( is_array($this->url) ) {
+                        $this->url = array_map(function ($elem) {
+                            return self::appendParametersToURL($elem, $this->data);
+                        }, $this->url);
+                    } else {
+                        $this->options[CURLOPT_URL] = self::appendParametersToURL(
+                            $this->options[CURLOPT_URL],
+                            $this->data
+                        );
                     }
                     break;
-                
+
                 case 'ssl':
                     $this->options[CURLOPT_SSL_VERIFYPEER] = true;
                     $this->options[CURLOPT_SSL_VERIFYHOST] = 2;
-                    if( defined('CLEANTALK_CASERT_PATH') && CLEANTALK_CASERT_PATH ){
+                    if ( defined('CLEANTALK_CASERT_PATH') && CLEANTALK_CASERT_PATH ) {
                         $this->options[CURLOPT_CAINFO] = CLEANTALK_CASERT_PATH;
                     }
                     break;
-                    
+
                 case 'no_cache':
                     // Append parameter in a different way for single and multiple requests
-                    if( is_array($this->url) ){
-                        $this->url = array_map(static function ($elem){ return self::appendParametersToURL($elem, ['no_cache' => mt_rand()]); }, $this->url);
-                    }else{
-                        $this->options[CURLOPT_URL] = self::appendParametersToURL($this->options[CURLOPT_URL], ['no_cache' => mt_rand()]);
+                    if ( is_array($this->url) ) {
+                        $this->url = array_map(static function ($elem) {
+                            return self::appendParametersToURL($elem, ['no_cache' => mt_rand()]);
+                        }, $this->url);
+                    } else {
+                        $this->options[CURLOPT_URL] = self::appendParametersToURL(
+                            $this->options[CURLOPT_URL],
+                            ['no_cache' => mt_rand()]
+                        );
                     }
                     break;
             }
         }
     }
-    
+
     /**
      * Appends given parameter(s) to URL considering other parameters
      * Adds ? or & before the append
      *
-     * @param string       $url
+     * @param string $url
      * @param string|array $parameters
      *
      * @return string
      */
-    public static function appendParametersToURL( $url, $parameters ){
-        
-        if( empty($parameters) ){
+    public static function appendParametersToURL($url, $parameters)
+    {
+        if ( empty($parameters) ) {
             return $url;
         }
-        
-        $parameters = is_array( $parameters )
-            ? http_build_query( $parameters )
+
+        $parameters = is_array($parameters)
+            ? http_build_query($parameters)
             : $parameters;
-        
-        $url .= strpos( $url, '?' ) === false
+
+        $url .= strpos($url, '?') === false
             ? ('?' . $parameters)
             : ('&' . $parameters);
-        
+
         return $url;
     }
 
+    /**
+     * Checks if the string is JSON type
+     *
+     * @param string $string
+     *
+     * @return bool
+     */
+    public static function isJson($string)
+    {
+        return is_string($string) && is_array(json_decode($string, true));
+    }
 }

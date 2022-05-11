@@ -1,8 +1,6 @@
 <?php
 
-
 namespace Cleantalk\Common\HTTP;
-
 
 class Response
 {
@@ -11,7 +9,7 @@ class Response
     private $error;
     private $info;
     private $response_code;
-    
+
     /**
      * HTTPResponse constructor.
      *
@@ -26,11 +24,11 @@ class Response
         $this->error     = ! empty($raw['error'])
             ? $raw
             : null;
-        if( isset($this->info['http_code']) ){
+        if ( isset($this->info['http_code']) ) {
             $this->response_code = (int)$this->info['http_code'];
         }
     }
-    
+
     /**
      * @return mixed
      */
@@ -38,7 +36,7 @@ class Response
     {
         return $this->error;
     }
-    
+
     /**
      * @return mixed
      */
@@ -46,7 +44,7 @@ class Response
     {
         return $this->response_code;
     }
-    
+
     /**
      * @return mixed
      */
@@ -54,7 +52,7 @@ class Response
     {
         return $this->raw;
     }
-    
+
     /**
      * @return mixed
      */
@@ -62,7 +60,7 @@ class Response
     {
         return $this->processed;
     }
-    
+
     /**
      * @param mixed $processed
      */
@@ -70,7 +68,7 @@ class Response
     {
         $this->processed = $processed;
     }
-    
+
     /**
      * @return mixed
      */
