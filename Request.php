@@ -1,6 +1,6 @@
 <?php
 
-namespace Cleantalk\Common\HTTP;
+namespace Cleantalk\Common\Http;
 
 /**
  * Class Request
