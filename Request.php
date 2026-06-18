@@ -225,7 +225,9 @@ class Request
             $request_result = array('error' => curl_error($ch));
         }
 
-        curl_close($ch);
+        if ( version_compare(PHP_VERSION, '8.0.0', '<') ) {
+            curl_close($ch);
+        }
 
 
         return new Response($request_result, $curl_info);
