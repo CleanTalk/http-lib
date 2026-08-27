@@ -170,13 +170,23 @@ class Request
      */
     public function request()
     {
-        // Return the error if cURL is not installed
-        if ( ! function_exists('curl_init') ) {
-            return array('error' => 'CURL_NOT_INSTALLED');
-        }
-
         if ( empty($this->url) ) {
             return array('error' => 'URL_IS_NOT_SET');
+        }
+
+        // Fallback to socket when cURL is unavailable
+        if ( ! function_exists('curl_init') ) {
+            if (
+                ! is_array($this->url) &&
+                in_array('retry_with_socket', $this->presets, true)
+            ) {
+                $this->response = $this->requestWithSocket();
+                if ( $this->response->getError() ) {
+                    return $this->response->getError();
+                }
+                return $this->runCallbacks();
+            }
+            return array('error' => 'CURL_NOT_INSTALLED');
         }
 
         $this->convertOptionsTocURLFormat();
@@ -293,7 +303,7 @@ class Request
             [
                 'http' => [
                     'method'  => 'GET', //in_array('get', $this->presets, true) ? 'GET' : 'POST',
-                    'timeout' => $this->options[CURLOPT_TIMEOUT],
+                    'timeout' => $this->getSocketTimeout(),
                     'content' => $this->data,
                 ],
             ]
@@ -303,6 +313,20 @@ class Request
             ?: ['error' => 'FAILED_TO_USE_FILE_GET_CONTENTS'];
 
         return new Response($response_content, []);
+    }
+
+    /**
+     * Get timeout for socket requests, works without cURL extension constants
+     */
+    private function getSocketTimeout()
+    {
+        if ( isset($this->options['timeout']) ) {
+            return (int) $this->options['timeout'];
+        }
+        if ( defined('CURLOPT_TIMEOUT') && isset($this->options[CURLOPT_TIMEOUT]) ) {
+            return (int) $this->options[CURLOPT_TIMEOUT];
+        }
+        return 10;
     }
 
     // Process with callback if passed. Save the processed result.
